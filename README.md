@@ -20,14 +20,14 @@ Write and assign your own functions...
 Tagging a function to a particular DVGrouper/DataFrame automatically includes the function in the correct page of your `MKDocs` documentation and adds type hints to the function definition, in order to validate inputs against the DataFrame's Pandera schema. 
 
 Some Examples: 
-* Check a list of columns for statistical normality and include metadata file (`include_in_metadata`)
-* Run a P-Test for a correlation between two columns 
+* Check a list of columns for statistical normality and include metadata file (`include_in_metadata`).
+* Run a P-Test for a correlation between two columns.
 * Generate and store plots in a given folder & embed in your project documentation.
-* Output any failed schema validation attempts to a log file. 
+* Output any failed schema validation attempts to a log file.
 
 #### Metadata and Documentation (`MKDocs`)
 
-* Collect metadata on column schema (column types, example values, index column, no. distinct values, missing values), no. of rows, file and column size, ranges of data (e.g. for a "years" column), time last read, I/O time, time last updated.
+* Collect metadata on column schema (column types, example values, index column, no. distinct values, no. duplicate values, no. missing values), no. of rows, file and column size, ranges of data (e.g. for a "years" column), time last read, I/O time, time last updated.
     * Auto-generate a YAML file with this metadata (`metadata.yaml`) 
     * Incorporate with a separate file (`codebook.yaml`) for manually editing arbitrary fields (e.g. links to external data sources, written descriptions of columns).
 * Automatically generate a directory of `MKDocs`-compatible markdown documentation for your DataFrames' metadata and their associated functions. 
