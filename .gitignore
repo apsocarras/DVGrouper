@@ -1,4 +1,5 @@
-scrap.ipynb
+# add a directory for scrap work 
+z_scrap/* 
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
