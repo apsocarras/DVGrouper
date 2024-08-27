@@ -14,7 +14,8 @@ requires-python = ">=3.8"
 license = { text = "MIT" }
 
 dependencies = [
-    "polars",    
+    "polars",
+    "pyarrow",    
     "pydantic",
     "pandera[polars]"
 ]
@@ -32,9 +33,6 @@ test = [
     "pytest-line-profiler", 
 ]
 
-#cloud = [
- #   "azb-manager @ https://test-files.pythonhosted.org/packages/your-package-path/azb_manager-0.1.0-py3-none-any.whl", 
-#]
 notebooks = [ # for running example notebooks in parent directory 
     "jupyterlab"
 ]
