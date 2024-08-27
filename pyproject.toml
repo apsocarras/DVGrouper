@@ -1,0 +1,43 @@
+[build-system]
+requires = ["flit_core >=3.2,<4"]
+build-backend = "flit_core.buildapi"
+
+[project]
+name = "dv-grouper"
+version = "0.1.0"
+authors = [
+    { name="Alex Socarras", email="apsocarras@gmail.com" }
+]
+description = "A package for reading, validating, grouping, and documenting DataFrames using Polars, Pandas, or PySpark."
+readme = "README.md"
+requires-python = ">=3.8"
+license = { text = "MIT" }
+
+dependencies = [
+    "polars",    
+    "pydantic",
+    "pandera[polars]"
+]
+
+[project.urls]
+Homepage = "https://github.com/apsocarras/DVGrouper"
+
+[project.optional-dependencies]
+test = [
+    "pytest >=2.7.3",
+    "pytest-cov",
+    "pytest-env",
+    "pytest-progress", 
+    "line-profiler",
+    "pytest-line-profiler", 
+]
+
+#cloud = [
+ #   "azb-manager @ https://test-files.pythonhosted.org/packages/your-package-path/azb_manager-0.1.0-py3-none-any.whl", 
+#]
+notebooks = [ # for running example notebooks in parent directory 
+    "jupyterlab"
+]
+pandas = ["pandas"]
+pyspark = ["pyspark[connect]"]
+fastapi = ["fastapi"]
