@@ -1,6 +1,9 @@
 # add a directory for scrap work 
 z_scrap/* 
 
+# Azurite Emulation 
+__azurite_db_table__.json 
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
