@@ -3,7 +3,7 @@ import pandas as pd
 import numpy as np 
 import os 
 from typing import Literal
-from src.dv_grouper.schemas import DataPath
+from src.dv_grouper.schemas import TabularDataFile
 import test.logging_config
 import logging
 
@@ -31,9 +31,9 @@ def tmp_file(tmp_path_factory, request) -> None:
     return {'parquet_path':str(parquet_path), 'csv_path': str(csv_path)}
 
 @pytest.mark.parametrize('tmp_file', ['dummy_data'], indirect=True)
-def test_DataPath(tmp_file):
-    parsed_parquet = DataPath(path=tmp_file['parquet_path'])
-    parsed_csv = DataPath(path=tmp_file['csv_path'])
+def test_TabularDataFile(tmp_file):
+    parsed_parquet = TabularDataFile(path=tmp_file['parquet_path'])
+    parsed_csv = TabularDataFile(path=tmp_file['csv_path'])
 
     logger.info(parsed_parquet)
     logger.info(parsed_csv)

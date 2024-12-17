@@ -4,8 +4,35 @@ import pandas as pd
 import polars as pl 
 import bisect 
 from typing import Union
+from ..schemas import ObjectName
 ### ------------------------------------------------------------------------------ ###
 ### --- GENERAL UTILS  --- ###
+
+def named_class_factory(cls, name: str, *args, **kwargs):
+    """
+    Factory for creating a named subclass of a parent. 
+
+    myDVBundle = DVBundle.create('myDVBundle')
+
+    print(myDVBundle.__name__)
+    >>> "myDVBundle"
+
+    myDVBundle = DVBundle.create('differentName')
+
+    print(myDVBundle.__name__)
+    >>> "differentName"
+
+    myDVBundle = DVBundle.create(' $ f : invalid object name')
+    >>> ValueError: Provided object name invalid (' $ f : invalid object name ')
+
+    """
+    class NamedSubClass(cls.__class__):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+    parsed_name = ObjectName(name)
+    NamedSubClass.__name__ = parsed_name
+    return NamedSubClass
+
 
 def get_closest_n(n, ls:list, sort=True): 
     """Match n to closest element in (sorted) ls. n and ls must be numeric."""

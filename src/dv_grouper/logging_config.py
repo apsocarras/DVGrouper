@@ -1,21 +1,19 @@
 import datetime
 import logging
 import os
+from .config import Config
 
 # Configure logging.
 # `export DEBUG=1` to see debug output.
 # `mkdir logs` to write to files too.
 # Create loggers with `import logging; logger = logging.getLogger(__name__)`
 
-class Config: 
-    LEVEL = logging.DEBUG
-
 module_logger = logging.getLogger(__name__)
-module_logger.setLevel(Config.LEVEL)
+module_logger.setLevel(Config.LOGLEVEL)
 module_logger_str = f"({module_logger.name}: {module_logger.level})"
 
 main_logger = logging.getLogger('__main__') # Logger to use ony when module is invoked from CLI (??)
-main_logger.setLevel(Config.LEVEL)
+main_logger.setLevel(Config.LOGLEVEL)
 main_logger_str = f"({main_logger.name}: {main_logger.level})"
 
 

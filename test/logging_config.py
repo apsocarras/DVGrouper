@@ -9,6 +9,7 @@ import os
 
 class Config: 
     LEVEL = logging.DEBUG
+    engine = 'polars' # 'pandas', 'pyspark'
 
 module_logger = logging.getLogger(__name__)
 module_logger.setLevel(Config.LEVEL)

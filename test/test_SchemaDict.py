@@ -77,40 +77,40 @@ def test_SchemaDict_add(all_sample_data, default_SchemaDict, new_Schema, exist_m
             ### Attempting to add a schema by a name which is already taken 
 
             # Add new schema by old name 
-            default_SchemaDict.add(schema=new_Schema,
+            default_SchemaDict.add_schema(schema=new_Schema,
                                     schema_name=old_schema_name, 
                                     exists=exist_mode)
 
             # Add old schema by old name 
-            default_SchemaDict.add(schema=old_schema,
+            default_SchemaDict.add_schema(schema=old_schema,
                                 schema_name=old_schema_name, 
                                 exists=exist_mode)
 
             # Add old schema directly 
-            default_SchemaDict.add(schema=old_schema,
+            default_SchemaDict.add_schema(schema=old_schema,
                                 exists=exist_mode)
     else: 
         ### Attempting to add a schema by a name which is already taken 
 
 
         # Add old schema by old name 
-        default_SchemaDict.add(schema=old_schema,
+        default_SchemaDict.add_schema(schema=old_schema,
                             schema_name=old_schema_name, 
                             exists=exist_mode)
 
         # Add old schema directly 
-        default_SchemaDict.add(schema=old_schema,
+        default_SchemaDict.add_schema(schema=old_schema,
                             exists=exist_mode)
         
         # Add new schema by old name (should replace for newer mode)
-        default_SchemaDict.add(schema=new_Schema,
+        default_SchemaDict.add_schema(schema=new_Schema,
                                 schema_name=old_schema_name, 
                                 exists=exist_mode)
     
     ### Adding new Schema by a new name 
-    default_SchemaDict.add(schema_name=new_Schema.__name__, 
+    default_SchemaDict.add_schema(schema_name=new_Schema.__name__, 
                            schema=new_Schema)
-    default_SchemaDict.add(schema=new_Schema, exists='replace')
+    default_SchemaDict.add_schema(schema=new_Schema, exists='replace')
 
     # Check if replace worked correctly 
     if exist_mode == 'replace': 
@@ -126,10 +126,10 @@ def test_SchemaDict_remove(all_sample_data, default_SchemaDict, new_Schema):
 
     # Attempting to remove a schema which it doesn't have 
     with pytest.raises(AttributeError):
-        default_SchemaDict.remove(new_Schema)
+        default_SchemaDict.remove_schema(new_Schema)
 
     # Removing a schema 
-    default_SchemaDict.remove(all_sample_data[0]['schema_name'])
+    default_SchemaDict.remove_schema(all_sample_data[0]['schema_name'])
     
     logger.info(f'After remove: {default_SchemaDict}')
 
