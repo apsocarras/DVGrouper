@@ -1,6 +1,5 @@
 from typing import Callable, Type, TypedDict, Any, Literal
 from typing import Callable, Type, TypedDict, Literal, Any
-from ..types import FunctionMetadata, DescriptionFile
 
 # Check if it has the attribute
 def check_registry(cls, attr_name, create_registry=False):
@@ -16,7 +15,7 @@ def register_function(target_class: Type[Any],
                       create_registry: bool = False):
 
     def decorator(func: Callable[..., Any]):
-        metadata: FunctionMetadata = {
+        metadata = {
             'name': func.__name__,
             'module': func.__module__,
             'code_source': func.__code__.co_filename,

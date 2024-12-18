@@ -4,7 +4,7 @@ import pandas as pd
 import polars as pl 
 import bisect 
 from typing import Union
-from ..schemas import ObjectName
+from dv_grouper.metadata_schemas import ObjectName
 ### ------------------------------------------------------------------------------ ###
 ### --- GENERAL UTILS  --- ###
 
@@ -89,7 +89,7 @@ def get_consecutive_year_ranges(years:list):
 
     return ranges
 
-def get_df_metadata_dict(df:Union[pd.DataFrame, pl.DataFrame], df_name=None, include_size='MB', size_mode='total', **kwargs) -> dict: 
+def get_pandas_metadata_dict(df:Union[pd.DataFrame, pl.DataFrame], df_name=None, include_size='MB', size_mode='total', **kwargs) -> dict: 
     """
     Create dict containing metadata of a Pandas or Polars DataFrame. 
 
