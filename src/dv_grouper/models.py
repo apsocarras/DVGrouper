@@ -197,8 +197,10 @@ class DVBundleMetadata(DVBundleExternalMetadata):
                 {
                     "name": col,
                     "dtype": col_types[col],
-                    "size": SizeDesignator.create_str(
-                        n=df.select(col).estimated_size(size_unit), unit=size_unit
+                    "size": str(
+                        SizeDesignator(
+                            n=df.select(col).estimated_size(size_unit), unit=size_unit
+                        )
                     ),
                     "example_values": df[col].unique().head(n_unique_include).to_list(),
                     "n_rows": df_count_total.select(col).to_series().to_list(),
@@ -452,7 +454,7 @@ class ObjectName(BaseModel):
         """
         Ensure that the given object name is a valid object name or can be parsed to one
         """
-        regex = f"{cls._regex_invalid_object_characters}|{cls.regex_reserved_words}"
+        regex = f"{cls._regex_invalid_object_characters}|{cls._regex_reserved_words}"
         if d["handler"] == "error":
             if re.search(regex, d["name"]):
                 raise ValueError(
