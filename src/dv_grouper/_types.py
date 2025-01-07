@@ -48,7 +48,6 @@ from polars._typing import SizeUnit
 
 from abc import ABC, abstractmethod
 from typing import runtime_checkable
-import logging_config
 import logging
 
 
