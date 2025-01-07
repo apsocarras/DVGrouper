@@ -46,7 +46,7 @@ from pydantic import (
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    from dv_grouper._types import GenericMetadata
+    from dv_grouper._types import DataSource, GenericMetadata
 
 
 @runtime_checkable
@@ -406,7 +406,7 @@ class ObjectName(BaseModel):
         """
         Replace certain characters ("\/|\.|-|,|\\") with "_"
         """
-        return re.sub(cls.regex_separators, "_", s)
+        return re.sub(cls._regex_separators, "_", s)
 
     @classmethod
     def remove_invalid(cls, s: str, exclude_reserved=True):
@@ -433,18 +433,8 @@ class ObjectName(BaseModel):
         return s
 
     @classmethod
-    def from_data_source(
-        cls, d: Union[pl.DataFrame, "ParquetFile", "DirectoryPath", "BlobStorageUrl"]
-    ) -> "ObjectName":
+    def from_data_source(cls, d: DataSource) -> "ObjectName":
         match d:
-            case pl.DataFrame():
-                if not NamedDataFrame.check(d):
-                    raise ValueError(
-                        "Cannot get ObjectName from DataFrame without `name` attribute"
-                    )
-                else:
-                    obj_name = ObjectName.parse_object_name(d.name)
-                    return obj_name
             case ParquetFile() | DirectoryPath() | BlobStorageUrl():
                 basename: str = os.path.basename(d)
                 if basename.endswith(".parquet"):
@@ -453,7 +443,7 @@ class ObjectName(BaseModel):
                 return obj_name
             case _:
                 raise TypeError(
-                    f"Cannot parse object name from {type(d)} (must be one of Union[pl.DataFrame, ParquetFile, DirectoryPath, BlobStorageUrl])"
+                    f"Cannot parse object name from {type(d)} (must be one of: ParquetFile, DirectoryPath, BlobStorageUrl)"
                 )
 
     @model_validator(mode="before")
@@ -471,6 +461,20 @@ class ObjectName(BaseModel):
         elif d["handler"] == "parse":
             cls.parse_object_name(d["name"])
         return d
+
+    @classmethod
+    def from_df(
+        cls, df: Union[pl.DataFrame, pl.LazyFrame], use_parsed_name: bool
+    ) -> "ObjectName":
+        if not NamedDataFrame.check(df):
+            raise ValueError(
+                "Cannot get ObjectName from DataFrame without `name` attribute"
+            )
+        else:
+            obj_name = ObjectName(
+                name=df.name, handler="parse" if use_parsed_name else "error"
+            )
+            return obj_name
 
 
 class SizeDesignator(BaseModel):
@@ -564,10 +568,57 @@ class ParquetFile(BaseModel):
             case str():
                 return os.path.splitext(val)[1] == ".parquet"
 
+    @model_validator(mode="before")
+    @classmethod
+    def check_exists(cls, val: Union[dict, str]):
+        match val:
+            case dict():
+                fp = val.get("file_path", "")
+                if not os.path.isfile(fp):
+                    raise ValueError(f"{fp} does not exist.")
+                return val
+            case str():
+                return os.path.isfile(fp)
 
-class DataCollection(BaseModel):
+
+class LoadOptions(BaseModel):
     """
-    Parent model for the two main models: DVBundle and DVGrouper
+    Model for the data loading options you can set when defining a DVBundle or DVGrouper.
+    """
+
+    storage_options: Optional[Mapping[str, Any]] = Field(
+        None,
+        description="""A dictionary of credentials (e.g., API keys) required for data access. Defaults to None. See polars documentation for valid options.
+        Caution: You may want to use this on load() rather than persist them along with the object.
+        """,
+    )
+    metadata_on_load: Optional[bool] = Field(
+        False,
+        description="Whether to load metadata on along with data (default is False)",
+        frozen=False,
+    )
+    load_lazy: Optional[bool] = Field(
+        True, description="Whether to load in DataFrames lazily or eagerly."
+    )
+
+    require_schema: Optional[bool] = Field(
+        False,
+        description="""Whether to require specifying a schema when loading in data sources or adding existing DataFrames/LazyFrames.""",
+    )
+    reload_dataframe: Optional[bool] = Field(
+        False,
+        description="""Whether to re-load a DataFrame/LazyFrame from source if .load() is called and .df is already set.""",
+    )
+
+    add_timestamp: Optional[bool] = Field(
+        False,
+        description="Whether to include a timestamp in the metadata upon loading.",
+    )
+
+
+class MetadataOptions(BaseModel):
+    """
+    Model for the metadata options you can set when defining a DVBundle or DVGrouper.
     """
 
     model_config = ConfigDict(extra="allow")
@@ -592,12 +643,6 @@ class DataCollection(BaseModel):
         "mb", description="The size unit of the object (default is 'mb')", frozen=False
     )
 
-    metadata_on_load: Optional[bool] = Field(
-        False,
-        description="Whether to load metadata on along with data (default is False)",
-        frozen=False,
-    )
-
     metadata_function: Optional[
         Callable[[pl.DataFrame, *tuple[Any, ...]], GenericMetadata]
     ] = Field(
@@ -618,23 +663,8 @@ class DataCollection(BaseModel):
         frozen=False,
     )
 
-    include_timestamp: Optional[bool] = Field(
-        None, description="Whether to include a timestamp in the data collection."
-    )
-
     _time_loaded: Optional[datetime] = (
         None  # Internal field to mark when data was last read
-    )
-
-    storage_options: Optional[Mapping[str, Any]] = Field(
-        None,
-        description="""A dictionary of credentials (e.g., API keys) required for data access. Defaults to None. See polars documentation for valid options.
-        Caution: You may want to use this on load() rather than persist them along with the object.
-        """,
-    )
-
-    load_lazy: Optional[bool] = Field(
-        True, description="Whether to load in DataFrames lazily or eagerly."
     )
 
     model_config = ConfigDict(arbitrary_types_allowed=True)

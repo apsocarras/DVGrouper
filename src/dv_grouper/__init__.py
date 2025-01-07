@@ -1,5 +1,10 @@
+"""
+A package with two primary models for interacting with DataFrames and tabular (.parquet) data sources
+"""
+
 import logging
 import os
+import warnings
 from collections.abc import Sequence
 from datetime import datetime
 from functools import wraps
@@ -7,27 +12,22 @@ from re import Pattern
 from types import FunctionType
 from typing import TYPE_CHECKING, Any, Callable, Literal, Mapping, Optional, Union
 
+import pandera as pa
 import polars as pl
 from models import (
     BlobStorageUrl,
+    LoadOptions,
     MarkdownOutput,
+    MetadataOptions,
     NamedDataFrame,
     ObjectName,
     ParquetFile,
     SizeDesignator,
 )
-from pydantic import (
-    AnyUrl,
-    BaseModel,
-    ConfigDict,
-    DirectoryPath,
-    Field,
-)
+from pydantic import BaseModel, DirectoryPath, Field
 
+from dv_grouper._types import DF, DataSource, GenericMetadata
 from dv_grouper.models import DVBundleMetadata
-
-if TYPE_CHECKING:
-    from dv_grouper._types import GenericMetadata
 
 CUR_DIR = os.path.dirname(os.path.abspath(__file__))
 PAR_DIR = os.path.dirname(CUR_DIR)
@@ -35,78 +35,7 @@ PAR_DIR = os.path.dirname(CUR_DIR)
 logger = logging.getLogger(__name__)
 
 
-class _DataCollection(BaseModel):
-    model_config = ConfigDict(extra="allow")
-
-    description: Optional[str] = Field(
-        None,
-        description="An optional description of the object's data source(s).",
-        frozen=False,
-    )
-
-    links: Optional[Sequence[AnyUrl]] = Field(
-        None, description="An optional list of URLs related to the object", frozen=False
-    )
-
-    functions: Optional[Sequence[FunctionType]] = Field(
-        None,
-        description="An optional collection of functions related to the object. Functions can be added to this collection via @tag_func()",
-        frozen=False,
-    )
-
-    size_unit: SizeDesignator = Field(
-        "mb", description="The size unit of the object (default is 'mb')", frozen=False
-    )
-
-    metadata_on_load: Optional[bool] = Field(
-        False,
-        description="Whether to load metadata on along with data (default is False)",
-        frozen=False,
-    )
-
-    metadata_function: Optional[
-        Callable[[pl.DataFrame, *tuple[Any, ...]], GenericMetadata]
-    ] = Field(
-        default=DVBundleMetadata.from_df,
-        description="""Function for obtaining metadata from data sources in `data`. 
-                    Must be consistent with the markdown formatter function, if provided.
-                    Default is DVBundleMetadata.from_df().""",
-        frozen=False,
-    )
-
-    markdown_formatter: Optional[
-        Callable[[GenericMetadata, *tuple[Any, ...]], MarkdownOutput]
-    ] = Field(
-        default=DVBundleMetadata.to_markdown,
-        description="""An optional function to format metadata into markdown output. 
-        Must be consistent with the output of your metadata function. 
-        Requires metadata function.""",
-        frozen=False,
-    )
-
-    include_timestamp: Optional[bool] = Field(
-        None, description="Whether to include a timestamp in the data collection."
-    )
-
-    _time_loaded: Optional[datetime] = (
-        None  # Internal field to mark when data was last read
-    )
-
-    storage_options: Optional[Mapping[str, Any]] = Field(
-        None,
-        description="""A dictionary of credentials (e.g., API keys) required for data access. Defaults to None. See polars documentation for valid options.
-        Caution: You may want to use this on load() rather than persist them along with the object.
-        """,
-    )
-
-    load_lazy: Optional[bool] = Field(
-        True, description="Whether to load in DataFrames lazily or eagerly."
-    )
-
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-
-
-class DVBundle(_DataCollection):
+class DVBundle(BaseModel):
     """
     Class for associating a DataFrame(s) with its validation schema, metadata, description, and functions.
     Think of a DVBundle as everything associated with a single data file and how you are using it in your program.
@@ -116,41 +45,36 @@ class DVBundle(_DataCollection):
     TODO: Generate automated markdown documentation block for this bundle (its metadata, its related functions).
     """
 
-    data_source: DataSource = Field(
-        ...,
-        description="The data source associated with the DataFrame OR the DataFrame itself; for most use cases, this should probably point to something in storage and not already in memory.",
+    source: DataSource = Field(
+        None,
+        description="The data source associated with the DataFrame.",
+        nullable=True,
         frozen=True,
     )
+
+    df: DF = Field(
+        None,
+        description="A DataFrame/LazyFrame either loaded from `source` (if provided) or one already existing in memory; if None, .load() will read into a pl.LazyFrame",
+        nullable=True,
+        frozen=True,
+    )
+
     schema: Optional[pa.DataFrameModel] = Field(
         None,
         description="The schema of the DataFrame represented as a DataFrameModel",
         frozen=True,
+        nullable=True,
     )
 
-    name_: Optional[ObjectName] = Field(
+    name: Optional[ObjectName] = Field(
         None,
-        description="Descriptive name for the data source. 1.) Must be valid python object name. 2.) If omitted, ObjectName must be obtainable from `data_source`",
+        description="Descriptive name for the data. 1.) Must be valid python object name. 2.) If omitted, ObjectName must be obtainable from either `source` or `df`",
         frozen=True,
+        nullable=True,
     )
-    _data: Optional[pl.DataFrame] = None  # Internal field to store loaded data
 
-    @property
-    def name(self) -> ObjectName:
-        """
-        Descriptive name for the DataFrame; default is the name of the file or directory in data_source
-        """
-        return self.name_ or ObjectName.from_data_source(self.data_source)
-
-    @property
-    def data(self) -> pl.DataFrame:
-        """
-        A property to access the loaded data.
-        If `_data` is None, defaults to `data_source`.
-            NOTE:
-                - on DVBundle.load(), `_data` is assigned the DataFrame loaded from `data_source`
-                - `_data` should be none if `data_source` is already a DataFrame.
-        """
-        return self._data or self.data_source
+    load_options: LoadOptions
+    metadata_options: MetadataOptions
 
     @property
     def metadata(self) -> DVBundleMetadata:
@@ -163,94 +87,98 @@ class DVBundle(_DataCollection):
 
     def load(
         self,
-        load_lazy: Optional[bool] = None,
-        metadata_on_load: Optional[bool] = None,
-        include_timestamp: Optional[bool] = True,
-        storage_options: Optional[Mapping[str, Any]] = None,
-    ) -> pl.DataFrame:
+    ) -> DF:
         """
         Loads and validates the data against the provided schema.
-
-        Args:
-            load_lazy: (Optional[bool]): Whether to load in polars DataFrame in lazy or eager mode.
-            metadata_on_load (Optional[bool]): If True, the metadata is extracted and stored alongside the data.
-                - This attribute can be accessed/updated later using the `self.get_metadata()` method.
-            include_timestamp (Optional[bool]): If True, a timestamp is added to `self.date_loaded`
-                                                indicating when the data was loaded.
-            storage_options (Optional[Mapping[str, str]]): A dictionary of credentials (e.g., API keys)
-                                                    required for data access. Defaults to None. See polars documentation for valid options.
-        Returns:
-            pl.DataFrame: The loaded data as a Polars DataFrame.
+        Sets the self.df attribute to the loaded DataFrame/LazyFrame.
         """
+        if self.df is None:
+            if not self.load_options.reload_dataframe:
+                warnings.warn(
+                    f"DataFrame already loaded and reload_dataframe=={self.load_options.reload_dataframe}. Returning "
+                )
+                return self.df
+            elif self.source is None:
+                raise ValueError(f"Cannot load data if self.source is {self.source}.")
+            else:
+                # delattr(self, "df") TODO: check if needed with frozen=True
+                df = self._load_df_from_data_source(
+                    data_source=self.source,
+                    load_lazy=self.load_options.load_lazy,
+                    storage_options=self.load_options.storage_options,
+                )
+                self.df = df
 
         if self.schema:
-            self.schema.validate(df)
+            self.schema.validate(self.df)
 
-        if include_timestamp:
-            timestamp_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            self._time_loaded = timestamp_str
+        if self.load_options.metadata_on_load:
+            opts = {}
+            if self.load_options.add_timestamp:
+                timestamp_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                opts["time_loaded"] = timestamp_str
+            self.get_and_set_metadata(**opts)
 
-        if metadata_on_load or (
-            metadata_on_load is None and self.metadata_on_load
-        ):  # can overwrite if set
-            self.get_metadata(time_loaded=self._time_loaded)
-
-        self._data = df
-
-        return self._data
+        return self.df
 
     @classmethod
-    def _df_from_data_source(
+    def _load_df_from_data_source(
         cls,
         data_source: DataSource,
         load_lazy: Optional[bool] = None,
         storage_options: Optional[Mapping[str, Any]] = None,
-    ) -> pl.DataFrame:
-        match data_source:
-            case pl.DataFrame():
-                df = data_source
-            case _ if ParquetFile.validate(data_source):
-                df = cls._check_lazy_load(data_to_read=data_source, load_lazy=load_lazy)
-            case _ if BlobStorageUrl.validate(data_source):
-                df = cls._check_lazy_load(
-                    data_to_read=data_source,
-                    load_lazy=load_lazy,
-                    storage_options=storage_options,
-                )
-            case _ if os.path.basename(data_source) == "":  # directory
-                data_to_read = (
-                    data_source
-                    if os.path.basename(data_source).endswith("*.parquet")
-                    else os.path.join(data_source, "*.parquet")
-                )
-                df = cls._check_lazy_load(data_to_read, load_lazy)
-            case _:
-                raise TypeError(
-                    f"Failed to load data_source (type: {type(data_source)}): {data_source}"
-                )
+    ) -> DF:
+        df = None
+        if ParquetFile.validate_ext(data_source) and ParquetFile.check_exists(
+            data_source
+        ):
+            df = cls._load_parquet(data_to_read=data_source, load_lazy=load_lazy)
+        elif BlobStorageUrl.validate(data_source):
+            df = cls._load_parquet(
+                data_to_read=data_source,
+                load_lazy=load_lazy,
+                storage_options=storage_options,
+            )
+        elif os.path.isdir(data_source):
+            data_to_read = os.path.join(data_source, "*.parquet")
+            df = cls._load_parquet(data_to_read=data_to_read, load_lazy=load_lazy)
+
+        if df is None:
+            raise TypeError(
+                f"Failed to load data_source (type: {type(data_source)}): {data_source}"
+            )
+        else:
+            return df
 
     @classmethod
-    def _check_lazy_load(
+    def _load_parquet(
         cls,
         data_to_read: Union[DataSource, str],
         load_lazy: Optional[bool] = None,
         storage_options: Optional[Mapping[str, Any]] = None,
-    ) -> Union[pl.DataFrame, pl.LazyFrame]:
+    ) -> DF:
+        """"""
         if load_lazy:
             df = pl.scan_parquet(data_to_read, storage_options=storage_options)
         else:
             df = pl.read_parquet(data_to_read, storage_options=storage_options)
         return df
 
-    def get_metadata(self, **kwargs) -> Union[DVBundleMetadata, GenericMetadata]:
+    def get_and_set_metadata(
+        self, **kwargs
+    ) -> Union[DVBundleMetadata, GenericMetadata]:
         """
         Update the metadata dictionary for a DVBundle. Resets the self.__metadata attribute.
         Use **kwargs to add any additional tags.
         """
-        metadata = self.metadata_function(self.data)
-        metadata = {**metadata, **kwargs}
-        self.__metadata = metadata
-        return self.__metadata
+        if self.df is None:
+            warnings.warn("self.df must be loaded before obtaining metadata.")
+            return None
+        else:
+            metadata = self.metadata_options.metadata_function(self.df)
+            metadata = {**metadata, **kwargs}
+            self.__metadata = metadata
+            return self.__metadata
 
     @wraps(DVBundleMetadata.register_func)
     def register_func(
@@ -268,33 +196,22 @@ class DVBundle(_DataCollection):
         DVBundleMetadata.remove_func(func)
 
 
-class DVGrouper(_DataCollection):
+class DVGrouper(BaseModel):
     """
     Class for loading and validating groups of closely-related .parquet files into DVBundles (DataFrames with associated metadata).
     Dynamically assigns these data objects as named attributes for access via '.' notation.
     Can produce a unified set of MKDocs-compatible markdown documentation incorporating all data sources included in the collection.
     """
 
-    data: Sequence[Union[DataSource, DVBundle]] = Field(
+    data_sources: Sequence[Union[DataSource, DVBundle]] = Field(
         ...,
         description="""Collection of DataSources (ParquetFile, DirectoryPath, BlobStorageUrl, or pl.DataFrame) or DVBundles. 
                     Non-parquet files in a directory, as well as any nested subdirectories, will be ignored.""",
         frozen=True,
     )
 
-    require_schema: Optional[bool] = Field(
-        False,
-        description="""Whether to require specifying a schema when loading in data sources. 
-                    If true, requires all data sources in `data` to be provided as DVBundles with associated schema attributes.""",
-    )
-
-    markdown_formatter: Callable[
-        [Sequence[GenericMetadata], *tuple[Any, ...]], MarkdownOutput
-    ] = Field(
-        None,  # placeholder - set in class method
-        description="An optional function to format metadata into markdown output. Must be consistent with the output of your metadata function.",
-        frozen=False,
-    )
+    load_options: LoadOptions
+    metadata_options: MetadataOptions
 
     def load(self: "DVGrouper") -> None:
         """
@@ -319,7 +236,9 @@ class DVGrouper(_DataCollection):
                     error_reasons.add(
                         "If passing a DataFrame directly, it must have a valid `name` attribute."
                     )
-            if self.require_schema and not (isinstance(d, DVBundle) and d.schema):
+            if self.load_options.require_schema and not (
+                isinstance(d, DVBundle) and d.schema
+            ):
                 error_reasons.add(
                     "If `self.require_schema`, objects must all be DVBundles with `schema` attribute."
                 )
@@ -330,20 +249,20 @@ class DVGrouper(_DataCollection):
 
         # Load data into bundles and set as attributes
         datasets = []
-        for data_source in self.data:
+        for data_source in self.data_sets:
             bundle = (
                 data_source
                 if isinstance(data_source, DVBundle)
                 else DVBundle(
                     data_source=data_source,
-                    metadata_function=self.metadata_function,
-                    markdown_formatter=self.markdown_formatter,
+                    metadata_function=self.metadata_options.metadata_function,
+                    markdown_formatter=self.metadata_options.markdown_formatter,
                 )
             )
             bundle.load(
-                metadata_on_load=self.metadata_on_load,
-                include_timestamp=self.include_timestamp,
-                storage_options=self.storage_options,
+                metadata_on_load=self.load_options.metadata_on_load,
+                include_timestamp=self.load_options.add_timestamp,
+                storage_options=self.load_options.storage_options,
             )
             setattr(self, bundle.name, bundle)
             datasets.append(bundle.name)
