@@ -1,45 +1,38 @@
-import polars as pl
-
-import os
-
-from functools import wraps
-
-from typing import Literal, Union, Optional, Mapping, Callable, Any, TypeVar, TypeAlias
-from abc import ABC
-from types import FunctionType
-from collections.abc import Sequence
-from metadata_schemas import DVBundleMetadata
-from pydantic import (
-    Field,
-    BaseModel,
-    DirectoryPath,
-    AnyUrl,
-    ConfigDict,
-)
-from re import Pattern
-from datetime import datetime
-from pathlib import Path
 import logging
+import os
+from collections.abc import Sequence
+from datetime import datetime
+from functools import wraps
+from re import Pattern
+from types import FunctionType
+from typing import TYPE_CHECKING, Any, Callable, Literal, Mapping, Optional, Union
 
-from _types import (
-    SizeDesignator,
-    DataSource,
-    DataFrameModel,
-    ParquetFile,
-    ObjectName,
-    MarkdownOutput,
+import polars as pl
+from models import (
     BlobStorageUrl,
+    MarkdownOutput,
     NamedDataFrame,
+    ObjectName,
+    ParquetFile,
+    SizeDesignator,
 )
+from pydantic import (
+    AnyUrl,
+    BaseModel,
+    ConfigDict,
+    DirectoryPath,
+    Field,
+)
+
+from dv_grouper.models import DVBundleMetadata
+
+if TYPE_CHECKING:
+    from dv_grouper._types import GenericMetadata
 
 CUR_DIR = os.path.dirname(os.path.abspath(__file__))
 PAR_DIR = os.path.dirname(CUR_DIR)
 
 logger = logging.getLogger(__name__)
-
-
-## TypeVar: Generic placeholder for metadata on a DataFrame
-GenericMetadata = TypeVar("GenericMetadata")
 
 
 class _DataCollection(BaseModel):
@@ -128,7 +121,7 @@ class DVBundle(_DataCollection):
         description="The data source associated with the DataFrame OR the DataFrame itself; for most use cases, this should probably point to something in storage and not already in memory.",
         frozen=True,
     )
-    schema: Optional[DataFrameModel] = Field(
+    schema: Optional[pa.DataFrameModel] = Field(
         None,
         description="The schema of the DataFrame represented as a DataFrameModel",
         frozen=True,
@@ -328,7 +321,7 @@ class DVGrouper(_DataCollection):
                     )
             if self.require_schema and not (isinstance(d, DVBundle) and d.schema):
                 error_reasons.add(
-                    f"If `self.require_schema`, objects must all be DVBundles with `schema` attribute."
+                    "If `self.require_schema`, objects must all be DVBundles with `schema` attribute."
                 )
             n_errors += 1
         if error_reasons:

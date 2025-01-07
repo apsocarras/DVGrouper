@@ -1,3 +1,7 @@
+"""
+Module containing auxiliary models other than the two main models of the dv_grouper package (DVGrouper, DVBundle)
+"""
+
 import json
 import keyword
 import logging
@@ -10,6 +14,7 @@ from csv import DictReader, DictWriter
 from datetime import datetime
 from types import FunctionType
 from typing import (
+    TYPE_CHECKING,
     Any,
     Callable,
     Literal,
@@ -39,6 +44,9 @@ from pydantic import (
 )
 
 logger = logging.getLogger(__name__)
+
+if TYPE_CHECKING:
+    from dv_grouper._types import GenericMetadata
 
 
 @runtime_checkable
@@ -555,3 +563,78 @@ class ParquetFile(BaseModel):
                 return val
             case str():
                 return os.path.splitext(val)[1] == ".parquet"
+
+
+class DataCollection(BaseModel):
+    """
+    Parent model for the two main models: DVBundle and DVGrouper
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    description: Optional[str] = Field(
+        None,
+        description="An optional description of the object's data source(s).",
+        frozen=False,
+    )
+
+    links: Optional[Sequence[AnyUrl]] = Field(
+        None, description="An optional list of URLs related to the object", frozen=False
+    )
+
+    functions: Optional[Sequence[FunctionType]] = Field(
+        None,
+        description="An optional collection of functions related to the object. Functions can be added to this collection via @tag_func()",
+        frozen=False,
+    )
+
+    size_unit: SizeDesignator = Field(
+        "mb", description="The size unit of the object (default is 'mb')", frozen=False
+    )
+
+    metadata_on_load: Optional[bool] = Field(
+        False,
+        description="Whether to load metadata on along with data (default is False)",
+        frozen=False,
+    )
+
+    metadata_function: Optional[
+        Callable[[pl.DataFrame, *tuple[Any, ...]], GenericMetadata]
+    ] = Field(
+        default=DVBundleMetadata.from_df,
+        description="""Function for obtaining metadata from data sources in `data`. 
+                    Must be consistent with the markdown formatter function, if provided.
+                    Default is DVBundleMetadata.from_df().""",
+        frozen=False,
+    )
+
+    markdown_formatter: Optional[
+        Callable[[GenericMetadata, *tuple[Any, ...]], MarkdownOutput]
+    ] = Field(
+        default=DVBundleMetadata.to_markdown,
+        description="""An optional function to format metadata into markdown output. 
+        Must be consistent with the output of your metadata function. 
+        Requires metadata function.""",
+        frozen=False,
+    )
+
+    include_timestamp: Optional[bool] = Field(
+        None, description="Whether to include a timestamp in the data collection."
+    )
+
+    _time_loaded: Optional[datetime] = (
+        None  # Internal field to mark when data was last read
+    )
+
+    storage_options: Optional[Mapping[str, Any]] = Field(
+        None,
+        description="""A dictionary of credentials (e.g., API keys) required for data access. Defaults to None. See polars documentation for valid options.
+        Caution: You may want to use this on load() rather than persist them along with the object.
+        """,
+    )
+
+    load_lazy: Optional[bool] = Field(
+        True, description="Whether to load in DataFrames lazily or eagerly."
+    )
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
