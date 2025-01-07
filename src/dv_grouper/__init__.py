@@ -413,30 +413,3 @@ class DVGrouper(_DataCollection):
         Take a sequence of metadata generated from individual DVBundles and create a unified MKDocs markdown document.
         """
         pass
-
-
-from _types import *
-from metadata_schemas import *
-
-data_sources = [
-    pl.DataFrame({"col1": [1, 2], "col2": [3, 4]}),
-    "example/parquet/path.parquet",
-    "example/directory/path/",
-    "https://myblobstorageaccount.blob.core.windows.net/mycontainer/data/sample.parquet",
-    "https://<storage_account_name>.blob.core.windows.net/<container_name>/data/subfolder/",
-]
-# Perform pattern matching
-for d in data_sources:
-    match d:
-        case _ if isinstance(d, pl.DataFrame):
-            print(f"{d} is a pl.DataFrame()")
-        case _ if ParquetFile.check_extension(d):
-            print(f"{d} is a parquet file")
-        case _ if BlobStorageUrl(url=d):
-            print(f"{d} is a blob storage URL")
-        case _:
-            print(f"{d} matched nothing")
-
-import os
-
-os.path.basename("example/parquet/path/")
