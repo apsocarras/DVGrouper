@@ -14,20 +14,29 @@ from typing import TYPE_CHECKING, Any, Callable, Literal, Mapping, Optional, Uni
 
 import pandera as pa
 import polars as pl
-from models import (
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    DirectoryPath,
+    Field,
+    FilePath,
+    field_validator,
+    model_validator,
+)
+
+from dv_grouper._types import DF, GenericMetadata
+from dv_grouper.models import (
     BlobStorageUrl,
+    DataSource,
+    DVBundleMetadata,
     LoadOptions,
     MarkdownOutput,
     MetadataOptions,
     NamedDataFrame,
     ObjectName,
     ParquetFile,
-    SizeDesignator,
+    check_data_source,
 )
-from pydantic import BaseModel, DirectoryPath, Field
-
-from dv_grouper._types import DF, DataSource, GenericMetadata
-from dv_grouper.models import DVBundleMetadata
 
 CUR_DIR = os.path.dirname(os.path.abspath(__file__))
 PAR_DIR = os.path.dirname(CUR_DIR)
@@ -43,56 +52,101 @@ class DVBundle(BaseModel):
     TODO: Register the function which created the DataFrame for this DVBundle using a decorator.
     TODO: Register a transformation function to this DataFrame using a decorator (reads from function signature).
     TODO: Generate automated markdown documentation block for this bundle (its metadata, its related functions).
+
+    Usage:
+
+    ```python
+    import os
+    import shutil
+
+    dir_ = os.path.join("my_path", "to")
+    os.makedirs(dir_, exist_ok=True)
+    example_dataframe = pl.DataFrame({"a": [1, 2, 3], "b": [True, False, True]})
+    example_parquet = os.path.join(dir_, "parquet.parquet")
+    example_dataframe.write_parquet(example_parquet)
+
+    q, _ = check_data_source(example_parquet)
+    print(type(q))
+    p = ParquetFile(file_path=example_parquet)
+    print(type(p))
+    DVBundle(source=q)
+    DVBundle(source=example_parquet)
+    ```
+
     """
 
-    source: DataSource = Field(
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    source: Optional[DataSource] = Field(
         None,
         description="The data source associated with the DataFrame.",
         nullable=True,
-        frozen=True,
+        frozen=False,
     )
 
-    df: DF = Field(
+    df: Optional["DF"] = Field(
         None,
         description="A DataFrame/LazyFrame either loaded from `source` (if provided) or one already existing in memory; if None, .load() will read into a pl.LazyFrame",
         nullable=True,
-        frozen=True,
+        frozen=False,
     )
 
-    schema: Optional[pa.DataFrameModel] = Field(
+    read_schema: Optional[pa.DataFrameModel] = Field(
         None,
         description="The schema of the DataFrame represented as a DataFrameModel",
-        frozen=True,
+        frozen=False,
         nullable=True,
     )
 
-    name: Optional[ObjectName] = Field(
+    name: Optional[str] = Field(
         None,
         description="Descriptive name for the data. 1.) Must be valid python object name. 2.) If omitted, ObjectName must be obtainable from either `source` or `df`",
-        frozen=True,
+        frozen=False,
         nullable=True,
     )
 
-    load_options: LoadOptions
-    metadata_options: MetadataOptions
+    load_options: LoadOptions = LoadOptions()
+    metadata_options: MetadataOptions = MetadataOptions()
+
+    @field_validator("source", mode="before")
+    @classmethod
+    def preprocess_source(cls, raw_source: Any):
+        if raw_source is not None and isinstance(raw_source, str):
+            parsed_source, _ = check_data_source(s=raw_source)
+            if parsed_source is None:
+                raise ValueError(f"Provided source str {raw_source} cannot be parsed.")
+            return parsed_source
+        else:
+            return raw_source
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def preprocess_name(cls, raw_name: Any):
+        if raw_name is not None and isinstance(raw_name, str):
+            parsed_name = ObjectName.parse_object_name(raw_name, as_str=True)
+            return parsed_name
+        else:
+            return raw_name
+
+    @model_validator(mode="before")
+    @classmethod
+    def ensure_one_data(cls, d: dict):
+        if d.get("source", None) is None and d.get("df", None) is None:
+            raise ValueError("Must provide at least one of: source, df")
+        return d
 
     @property
     def metadata(self) -> DVBundleMetadata:
-        """
-        Read the metadata attribute; does not re-scan the DataFrame for metadata.
-        """
-        if not hasattr(self, "__metadata"):
-            self.__metadata = self.get_metadata(time_loaded=self._time_loaded)
         return self.__metadata
 
     def load(
         self,
-    ) -> DF:
+    ) -> "DF":
         """
         Loads and validates the data against the provided schema.
         Sets the self.df attribute to the loaded DataFrame/LazyFrame.
         """
-        if self.df is None:
+        if self.df is not None:
             if not self.load_options.reload_dataframe:
                 warnings.warn(
                     f"DataFrame already loaded and reload_dataframe=={self.load_options.reload_dataframe}. Returning "
@@ -109,8 +163,8 @@ class DVBundle(BaseModel):
                 )
                 self.df = df
 
-        if self.schema:
-            self.schema.validate(self.df)
+        if self.read_schema:
+            self.read_schema.validate(self.df)
 
         if self.load_options.metadata_on_load:
             opts = {}
@@ -124,10 +178,10 @@ class DVBundle(BaseModel):
     @classmethod
     def _load_df_from_data_source(
         cls,
-        data_source: DataSource,
+        data_source: "DataSource",
         load_lazy: Optional[bool] = None,
         storage_options: Optional[Mapping[str, Any]] = None,
-    ) -> DF:
+    ) -> "DF":
         df = None
         if ParquetFile.validate_ext(data_source) and ParquetFile.check_exists(
             data_source
@@ -153,11 +207,10 @@ class DVBundle(BaseModel):
     @classmethod
     def _load_parquet(
         cls,
-        data_to_read: Union[DataSource, str],
+        data_to_read: Union["DataSource", str],
         load_lazy: Optional[bool] = None,
         storage_options: Optional[Mapping[str, Any]] = None,
-    ) -> DF:
-        """"""
+    ) -> "DF":
         if load_lazy:
             df = pl.scan_parquet(data_to_read, storage_options=storage_options)
         else:
@@ -166,7 +219,7 @@ class DVBundle(BaseModel):
 
     def get_and_set_metadata(
         self, **kwargs
-    ) -> Union[DVBundleMetadata, GenericMetadata]:
+    ) -> Union[DVBundleMetadata, "GenericMetadata"]:
         """
         Update the metadata dictionary for a DVBundle. Resets the self.__metadata attribute.
         Use **kwargs to add any additional tags.
@@ -203,7 +256,7 @@ class DVGrouper(BaseModel):
     Can produce a unified set of MKDocs-compatible markdown documentation incorporating all data sources included in the collection.
     """
 
-    data_sources: Sequence[Union[DataSource, DVBundle]] = Field(
+    data_sources: Sequence[Union["DataSource", DVBundle]] = Field(
         ...,
         description="""Collection of DataSources (ParquetFile, DirectoryPath, BlobStorageUrl, or pl.DataFrame) or DVBundles. 
                     Non-parquet files in a directory, as well as any nested subdirectories, will be ignored.""",
@@ -237,7 +290,7 @@ class DVGrouper(BaseModel):
                         "If passing a DataFrame directly, it must have a valid `name` attribute."
                     )
             if self.load_options.require_schema and not (
-                isinstance(d, DVBundle) and d.schema
+                isinstance(d, DVBundle) and d.read_schema
             ):
                 error_reasons.add(
                     "If `self.require_schema`, objects must all be DVBundles with `schema` attribute."
@@ -319,7 +372,7 @@ class DVGrouper(BaseModel):
 
     @classmethod
     def to_markdown(
-        cls, metadata: Sequence[GenericMetadata], *args: Any
+        cls, metadata: Sequence["GenericMetadata"], *args: Any
     ) -> MarkdownOutput:
         """
         Take a sequence of metadata generated from individual DVBundles and create a unified MKDocs markdown document.

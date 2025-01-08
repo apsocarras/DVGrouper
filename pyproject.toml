@@ -12,6 +12,7 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "faker>=33.3.0",
     "ipykernel>=6.29.5",
     "jupyterlab>=4.3.3",
     "pytest>=8.3.4",

@@ -14,14 +14,15 @@ from csv import DictReader, DictWriter
 from datetime import datetime
 from types import FunctionType
 from typing import (
-    TYPE_CHECKING,
     Any,
     Callable,
+    ClassVar,
     Literal,
     Mapping,
     Optional,
     Protocol,
     Sequence,
+    TypeAlias,
     Union,
     runtime_checkable,
 )
@@ -43,10 +44,11 @@ from pydantic import (
     validate_call,
 )
 
-logger = logging.getLogger(__name__)
+ClassVar
 
-if TYPE_CHECKING:
-    from dv_grouper._types import DataSource, GenericMetadata
+from dv_grouper._types import GenericMetadata
+
+logger = logging.getLogger(__name__)
 
 
 @runtime_checkable
@@ -105,7 +107,7 @@ class DVBundleExternalMetadata(BaseModel):
         description="File path (or URL) to the DataFrame source data; this might be omitted if the DVBundle loaded a DataFrame directly",
         frozen=True,
     )
-    schema: pa.DataFrameModel = Field(
+    read_schema: pa.DataFrameModel = Field(
         ...,
         description="DataFrameModel to validate DataFrame against when loading data or assigning an existing DataFrame",
         frozen=True,
@@ -388,54 +390,47 @@ class ObjectName(BaseModel):
 
     model_config = ConfigDict(extra="allow")
 
-    _regex_invalid_object_characters = r"^([^a-zA-Z_]+[^a-zA-Z_]*)|[^a-zA-Z0-9_]+"
-    _regex_reserved_words = (
+    regex_invalid_object_characters: ClassVar[str] = (
+        r"^([^a-zA-Z_]+[^a-zA-Z_]*)|[^a-zA-Z0-9_]+"
+    )
+    regex_reserved_words: ClassVar[str] = (
         r"\b(?:" + "|".join(re.escape(word) for word in keyword.kwlist) + r")\b"
     )
-    _regex_separators = "\/|\.|-|,|\\"
-
-    def __init__(self, name: str, handler: Literal["parse", "error"]):
-        """
-        Data model for a valid python object name.
-        """
-
-        self.name = self.parse_object_name(name) if handler == "parse" else name
-        self.handler = handler
-        super().__init__(name=self.name, handler=self.handler)
+    regex_separators: ClassVar[str] = r"\/|\.|-|,|\\"
 
     @classmethod
-    def sub_separators(cls, s: str) -> str:
-        """
-        Replace certain characters ("\/|\.|-|,|\\") with "_"
-        """
-        return re.sub(cls._regex_separators, "_", s)
-
-    @classmethod
-    def remove_invalid(cls, s: str, exclude_reserved=True):
-        """
-        Remove invalid names for a Python object (with/without excluding reserved keywords).
-        """
-        regex_to_delete = f"{cls._regex_invalid_object_characters}"
-        if exclude_reserved:
-            regex_to_delete += "|" + cls._regex_reserved_words
-        return re.sub(regex_to_delete, "", s)
-
-    @classmethod
-    def parse_object_name(cls, s: str) -> str:
+    def parse_object_name(cls, s: str, as_str: bool = True):
         """
         Removes and replaces values in a str to become a valid object name. Returns ValueError if the resulting string is empty.
 
         Replaces separators (/\.-,) with _
         Removes other invalid characters.
         """
-        s = cls.sub_separators(s)
-        s = cls.remove_invalid(s)
+        # Remove separators
+        pat = cls.regex_separators
+        try:
+            s = re.sub(pat, "_", s)
+        except Exception as e:
+            logger.error(f"Pattern: {pat}")
+            raise e
+        # Remove invalid characters and reserved words.
+        pat = f"{cls.regex_invalid_object_characters}|{cls.regex_reserved_words}"
+        try:
+            s = re.sub(pat, "", s)
+        except Exception as e:
+            logger.error(f"Pattern: {pat}")
+            raise e
+
         if len(s) == 0:
             raise ValueError(f'Unable to parse str "{s}" to a valid object name.')
-        return s
+
+        if as_str:
+            return s
+        else:
+            return ObjectName(name=s)
 
     @classmethod
-    def from_data_source(cls, d: DataSource) -> "ObjectName":
+    def from_data_source(cls, d: "DataSource") -> "ObjectName":
         match d:
             case ParquetFile() | DirectoryPath() | BlobStorageUrl():
                 basename: str = os.path.basename(d)
@@ -450,19 +445,27 @@ class ObjectName(BaseModel):
 
     @model_validator(mode="before")
     @classmethod
-    def ensure_valid_name(cls, d: dict) -> None:
+    def ensure_valid_name(cls, val: Union[dict, str]) -> Union[dict, bool]:
         """
-        Ensure that the given object name is a valid object name or can be parsed to one
+        Ensure that the given object name is a valid object name or can be parsed to one.
+        If called on str, returns bool (True if a valid name).
         """
-        regex = f"{cls._regex_invalid_object_characters}|{cls._regex_reserved_words}"
-        if d["handler"] == "error":
-            if re.search(regex, d["name"]):
-                raise ValueError(
-                    f"Supplied str '{d['name']}' is not a valid object name"
-                )
-        elif d["handler"] == "parse":
-            cls.parse_object_name(d["name"])
-        return d
+        regex = f"{cls.regex_invalid_object_characters}|{cls.regex_reserved_words}"
+        match val:
+            case dict():
+                if val.get("handler", None) is None:
+                    val["handler"] = "error"
+
+                if val["handler"] == "error":
+                    if re.search(regex, val["name"]):
+                        raise ValueError(
+                            f"Supplied str '{val['name']}' is not a valid object name"
+                        )
+                elif val["handler"] == "parse":
+                    cls.parse_object_name(val["name"])
+                return val
+            case str():
+                return not re.search(regex, val)
 
     @classmethod
     def from_df(
@@ -560,11 +563,18 @@ class ParquetFile(BaseModel):
 
     @model_validator(mode="before")
     @classmethod
+    def check_provided(cls, val: dict):
+        if val is not None and val.get("file_path", None) is None:
+            raise ValueError("Must provide `file_path` attribute (given: None)")
+        return val
+
+    @model_validator(mode="before")
+    @classmethod
     def validate_ext(cls, val: Union[dict, str]):
         match val:
             case dict():
                 fp = val.get("file_path", "")
-                if not os.path.splitext(fp)[1] == ".parquet":
+                if fp is not None and not os.path.splitext(fp)[1] == ".parquet":
                     raise ValueError(f"{fp} is not a valid .parquet file")
                 return val
             case str():
@@ -575,11 +585,12 @@ class ParquetFile(BaseModel):
     def check_exists(cls, val: Union[dict, str]):
         match val:
             case dict():
-                fp = val.get("file_path", "")
-                if not os.path.isfile(fp):
+                fp = val.get("file_path", None)
+                if fp is not None and not os.path.isfile(fp):
                     raise ValueError(f"{fp} does not exist.")
                 return val
             case str():
+                fp = val
                 return os.path.isfile(fp)
 
 
@@ -665,8 +676,64 @@ class MetadataOptions(BaseModel):
         frozen=False,
     )
 
-    _time_loaded: Optional[datetime] = (
-        None  # Internal field to mark when data was last read
-    )
-
     model_config = ConfigDict(arbitrary_types_allowed=True)
+
+
+def check_data_source(s: str) -> tuple:
+    """
+    Check if a string can be parsed to a valid DataSource type object.
+
+    Usage:
+
+
+    ```python
+    import shutil
+    import os
+
+    dir_ = os.path.join("my_path", "to")
+    os.makedirs(dir_, exist_ok=True)
+    example_parquet = os.path.join(dir_, "parquet.parquet")
+    with open(example_parquet, "w") as file:
+        file.write("my_Data")
+
+    # Parquet File
+    print(example_parquet)
+    data_source = check_data_source(example_parquet)
+    print(data_source)
+
+    # Directory
+    print(dir_)
+    data_source = check_data_source(dir_)
+    print(data_source)
+
+    # BlobStorageUrl
+    example_blob_storage_url = (
+        "https://mystorageaccount.blob.core.windows.net/mycontainer/myfile.txt"
+    )
+    print(example_blob_storage_url)
+    data_source = check_data_source(example_blob_storage_url)
+    print(data_source)
+
+    shutil.rmtree(dir_)
+    ```
+
+    """
+    exceptions = {}
+    try:
+        parquet = ParquetFile(file_path=s)
+        return parquet, exceptions
+    except Exception as e:
+        exceptions["parquet"] = e
+    try:
+        blob_url = BlobStorageUrl(url=s)
+        return blob_url, exceptions
+    except Exception as e:
+        exceptions["blob_url"] = e
+
+    is_dir_path = os.path.isdir(s)
+    if is_dir_path:
+        return DirectoryPath(s), exceptions
+    return None, exceptions
+
+
+DataSource: TypeAlias = Union[ParquetFile, DirectoryPath, BlobStorageUrl]
