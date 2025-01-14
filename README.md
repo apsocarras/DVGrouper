@@ -108,7 +108,4 @@ Follow the type signature of the default function in the `DVGrouper` class defin
 
 For larger projects, you can create multiple `DVGroupers` and include their auto-generated output in various sections. This could involve using custom markdown templating functions to generate documentation for each grouper and then writing a final build script which incorporates these sections together. 
 
- See [`mkdocs_examples/`](mkdocs_examples/) for an example of how you might approach this using the [MKDocs Material](https://squidfunk.github.io/mkdocs-material/) theme.
-
-
-
+See [`examples/docs/`](examples/docs/) for an example of how you might approach this using the [MKDocs Material](https://squidfunk.github.io/mkdocs-material/) theme.
